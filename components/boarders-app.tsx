@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { z } from 'zod'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { ArrowRight, Bath, BedDouble, BookOpenCheck, CalendarDays, CheckCircle2, ChevronDown, Clock3, Coffee, DoorOpen, House, Info, KeyRound, MapPin, Search, ShieldCheck, SlidersHorizontal, Sparkles, UserRound, Users, Wifi, X, Zap, WashingMachine, Waves, PawPrint, Camera, MapPinned, ReceiptText } from 'lucide-react'
 import { AuthPanel } from './auth-panel'
@@ -78,6 +79,21 @@ const navItems = [{ href: '/', label: 'Home', icon: <House className="size-4" />
 const viewingFees: Record<ViewingMode, number> = { accompanied: 150, unaccompanied: 0, proxy: 100 }
 const viewingLabels: Record<ViewingMode, string> = { accompanied: 'Accompanied viewing', unaccompanied: 'Unaccompanied viewing', proxy: 'Palihog / proxy viewing' }
 
+const viewingRequestSchema = z.object({
+  student_id: z.string().min(1),
+  property_id: z.string().refine((propertyId) => properties.some((property) => property.id === propertyId), 'Choose an existing property.'),
+  full_name: z.string().trim().min(1),
+  mobile: z.string().regex(/^09\d{9}$/),
+  email: z.string().email(),
+  preferred_date: z.string().min(1),
+  preferred_time: z.string().min(1),
+  notes: z.string().nullable(),
+  viewing_mode: z.enum(['accompanied', 'unaccompanied']),
+  payment_method: z.enum(['GCash', 'Cash']),
+  fee: z.number().finite().nonnegative(),
+  status: z.literal('Pending'),
+})
+
 function money(value: number) { return `₱${value.toLocaleString('en-PH')}` }
 
 export function BoardersApp({ view = 'home' }: { view?: 'home' | 'explore' | 'user' }) {
@@ -100,6 +116,7 @@ export function BoardersApp({ view = 'home' }: { view?: 'home' | 'explore' | 'us
   const [profileUniversity, setProfileUniversity] = useState(UNIVERSITY_DEFAULT)
   const [authNotice, setAuthNotice] = useState('')
   const [requestNotice, setRequestNotice] = useState('')
+  const [requestTechnicalDetails, setRequestTechnicalDetails] = useState<{ code: string; details?: string; hint?: string } | null>(null)
   const supabase = useMemo(() => createClient(), [])
 
   useEffect(() => {
@@ -124,13 +141,14 @@ event.preventDefault()
     if (!form.date) next.date = 'Choose a preferred date.'
     if (!form.time) next.time = 'Choose a preferred time.'
     setErrors(next)
+    setRequestTechnicalDetails(null)
     if (Object.keys(next).length || !selected) return
     if (!authUserId) {
       setAuthNotice('Please log in from the Profile page before submitting a viewing request.')
       setRequestOpen(false)
       return
     }
-    const { error } = await supabase.from('viewing_requests').insert({
+    const payload = {
       student_id: authUserId,
       property_id: selected.id,
       full_name: form.name.trim(),
@@ -142,9 +160,22 @@ event.preventDefault()
       viewing_mode: mode,
       payment_method: payment,
       fee: viewingFees[mode],
-      status: 'Pending',
-    })
+      status: 'Pending' as const,
+    }
+    const validation = viewingRequestSchema.safeParse(payload)
+    if (!validation.success) {
+      const firstIssue = validation.error.issues[0]
+      setRequestNotice('We could not save your request. Please review your selections and try again.')
+      setRequestTechnicalDetails({ code: 'CLIENT_VALIDATION', details: firstIssue?.message ?? 'Request payload did not match the required format.' })
+      return
+    }
+    const { error } = await supabase.from('viewing_requests').insert(validation.data)
     if (error) {
+      console.error('[v0] Viewing request insert failed', {
+        error: { message: error.message, code: error.code, details: error.details, hint: error.hint },
+        payload,
+      })
+      setRequestTechnicalDetails({ code: error.code ?? 'UNKNOWN', details: error.details, hint: error.hint })
       const developmentDetails = process.env.NODE_ENV === 'development' ? ` (${error.message}${error.code ? ` [${error.code}]` : ''}${error.details ? ` Details: ${error.details}` : ''}${error.hint ? ` Hint: ${error.hint}` : ''})` : ''
       const productionMessage: Record<string, string> = {
         '23503': "This listing isn't set up for viewing requests yet. Please contact us or try another listing.",
@@ -182,7 +213,7 @@ event.preventDefault()
     <BoardersFooter />
 
     {selected && <PropertyDialog property={selected} onClose={() => { setSelected(null); setRequestOpen(false); setSubmitted(false); setRequestNotice('') }} onRequest={() => { setRequestNotice(''); setRequestOpen(true) }} />}
-    {selected && requestOpen && <RequestDialog property={selected} form={form} update={update} errors={errors} mode={mode} setMode={setMode} payment={payment} setPayment={setPayment} onClose={() => { setRequestOpen(false); setRequestNotice('') }} onSubmit={submitRequest} submitted={submitted} requestNotice={requestNotice} onDone={() => { setRequestOpen(false); setSelected(null); setSubmitted(false); setRequestNotice('') }} />}
+    {selected && requestOpen && <RequestDialog property={selected} form={form} update={update} errors={errors} mode={mode} setMode={setMode} payment={payment} setPayment={setPayment} onClose={() => { setRequestOpen(false); setRequestNotice(''); setRequestTechnicalDetails(null) }} onSubmit={submitRequest} submitted={submitted} requestNotice={requestNotice} requestTechnicalDetails={requestTechnicalDetails} onDone={() => { setRequestOpen(false); setSelected(null); setSubmitted(false); setRequestNotice('') }} />}
   </main>
 }
 
@@ -242,6 +273,6 @@ function PropertyDialog({ property, onClose, onRequest }: { property: Property; 
 
 function Detail({ icon, label, value, unconfirmed = false, className = '', href }: { icon: React.ReactNode; label: string; value?: string; unconfirmed?: boolean; className?: string; href?: string }) { if (!value) return null; const content = <div className={`min-w-0 rounded-2xl border border-slate-100 bg-white p-3 shadow-sm transition hover:border-amber-200 hover:shadow-md ${className}`}><div className="flex items-center gap-2 text-amber-600">{icon}<span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{label}</span></div><p className="mt-2 break-words text-sm font-bold leading-5 text-[#102b4e]">{value}</p>{unconfirmed && <span className="mt-2 inline-flex rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-500">Unconfirmed, owner to verify</span>}</div>; return href ? <a href={href} target="_blank" rel="noreferrer" className="block rounded-2xl focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-200">{content}</a> : content }
 
-function RequestDialog({ property, form, update, errors, mode, setMode, payment, setPayment, onClose, onSubmit, submitted, requestNotice, onDone }: any) { return <Overlay labelledBy="request-title" onClose={onClose}>{submitted ? <div className="p-7 text-center sm:p-10"><div className="mx-auto grid size-16 place-items-center rounded-full bg-emerald-100 text-emerald-600"><CheckCircle2 className="size-9" /></div><h2 id="request-title" className="mt-5 text-2xl font-bold text-[#102b4e]">Viewing request ready</h2><p className="mx-auto mt-3 max-w-md text-slate-500">Your request for <strong>{property.title}</strong> is prepared. This prototype does not send it to a landlord or process payment.</p><div className="mt-6 rounded-2xl bg-slate-50 p-4 text-left text-sm"><p><strong>When:</strong> {form.date} at {form.time}</p><p className="mt-2"><strong>Mode:</strong> {viewingLabels[mode as ViewingMode]} · {money(viewingFees[mode as ViewingMode])}</p><p className="mt-2"><strong>Payment:</strong> {payment}</p></div><button onClick={onDone} className="mt-7 w-full rounded-2xl bg-[#102b4e] px-5 py-4 font-bold text-white">Return to listings</button></div> : <form onSubmit={onSubmit} className="flex max-h-[94vh] flex-col"><div className="flex items-start justify-between gap-4 border-b border-slate-100 p-6 sm:p-8"><div><p className="text-sm font-bold uppercase tracking-wider text-amber-600">Viewing request</p><h2 id="request-title" className="mt-1 text-2xl font-bold text-[#102b4e]">See {property.title}</h2><p className="mt-1 text-sm text-slate-500">Complete the details and choose how you would like to visit.</p></div><button type="button" onClick={onClose} aria-label="Close viewing request" className="grid size-10 shrink-0 place-items-center rounded-full bg-slate-100 text-[#102b4e]"><X /></button></div>{requestNotice && <div role="alert" className="mx-6 mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold leading-5 text-[#102b4e] sm:mx-8">{requestNotice}</div>}<div className="overflow-y-auto p-6 sm:p-8"><div className="grid gap-4 sm:grid-cols-2"><FormField label="Full name" id="name" value={form.name} onChange={update} error={errors.name} placeholder="Juan Dela Cruz" /><FormField label="Mobile number" id="mobile" value={form.mobile} onChange={update} error={errors.mobile} placeholder="09XXXXXXXXX" type="tel" /><FormField label="Email address" id="email" value={form.email} onChange={update} error={errors.email} placeholder="you@example.com" type="email" /></div><div className="mt-5 grid gap-4 sm:grid-cols-2"><FormField label="Preferred date" id="date" value={form.date} onChange={update} error={errors.date} type="date" /><FormField label="Preferred time" id="time" value={form.time} onChange={update} error={errors.time} type="time" /></div><label className="mt-5 block text-sm font-bold text-[#102b4e]">Viewing mode<select value={mode} onChange={(e) => setMode(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 font-medium outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100"><option value="accompanied">Accompanied viewing · ₱150</option><option value="unaccompanied">Unaccompanied viewing �� Free</option><option value="proxy">Palihog / proxy viewing · ₱100</option></select></label><p className="mt-2 text-xs text-slate-500">Accompanied: a Boarders Iloilo guide joins you. Unaccompanied: visit on your own. Palihog/proxy: a representative checks the room for you.</p><label className="mt-5 block text-sm font-bold text-[#102b4e]">Payment method<select value={payment} onChange={(e) => setPayment(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 font-medium outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100"><option>GCash</option><option>Cash</option></select></label><label className="mt-5 block text-sm font-bold text-[#102b4e]">Notes <textarea value={form.notes} onChange={(e) => update('notes', e.target.value)} rows={3} placeholder="Anything we should know? (optional)" className="mt-2 w-full resize-none rounded-xl border border-slate-200 px-3.5 py-3 font-normal outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100" /></label></div><div className="flex items-center justify-between gap-4 border-t border-slate-100 bg-white p-5 sm:px-8"><div><p className="text-xs font-bold uppercase tracking-wide text-slate-400">Viewing fee</p><p className="text-xl font-bold text-[#102b4e]">{money(viewingFees[mode as ViewingMode])}</p></div><button type="submit" className="rounded-2xl bg-amber-400 px-5 py-3.5 font-bold text-[#102b4e] shadow-sm hover:bg-amber-300 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-200">Submit request</button></div></form>}</Overlay> }
+function RequestDialog({ property, form, update, errors, mode, setMode, payment, setPayment, onClose, onSubmit, submitted, requestNotice, requestTechnicalDetails, onDone }: any) { return <Overlay labelledBy="request-title" onClose={onClose}>{submitted ? <div className="p-7 text-center sm:p-10"><div className="mx-auto grid size-16 place-items-center rounded-full bg-emerald-100 text-emerald-600"><CheckCircle2 className="size-9" /></div><h2 id="request-title" className="mt-5 text-2xl font-bold text-[#102b4e]">Viewing request ready</h2><p className="mx-auto mt-3 max-w-md text-slate-500">Your request for <strong>{property.title}</strong> is prepared. This prototype does not send it to a landlord or process payment.</p><div className="mt-6 rounded-2xl bg-slate-50 p-4 text-left text-sm"><p><strong>When:</strong> {form.date} at {form.time}</p><p className="mt-2"><strong>Mode:</strong> {viewingLabels[mode as ViewingMode]} · {money(viewingFees[mode as ViewingMode])}</p><p className="mt-2"><strong>Payment:</strong> {payment}</p></div><button onClick={onDone} className="mt-7 w-full rounded-2xl bg-[#102b4e] px-5 py-4 font-bold text-white">Return to listings</button></div> : <form onSubmit={onSubmit} className="flex max-h-[94vh] flex-col"><div className="flex items-start justify-between gap-4 border-b border-slate-100 p-6 sm:p-8"><div><p className="text-sm font-bold uppercase tracking-wider text-amber-600">Viewing request</p><h2 id="request-title" className="mt-1 text-2xl font-bold text-[#102b4e]">See {property.title}</h2><p className="mt-1 text-sm text-slate-500">Complete the details and choose how you would like to visit.</p></div><button type="button" onClick={onClose} aria-label="Close viewing request" className="grid size-10 shrink-0 place-items-center rounded-full bg-slate-100 text-[#102b4e]"><X /></button></div>{requestNotice && <div role="alert" className="mx-6 mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold leading-5 text-[#102b4e] sm:mx-8">{requestNotice}{requestTechnicalDetails && <details className="mt-2 text-xs font-medium"><summary className="cursor-pointer select-none text-amber-800">Technical details</summary><dl className="mt-2 space-y-1 rounded-xl bg-white/70 p-3 font-mono text-slate-600"><div><dt className="inline font-bold">Code:</dt> <dd className="inline">{requestTechnicalDetails.code}</dd></div>{requestTechnicalDetails.details && <div><dt className="inline font-bold">Details:</dt> <dd className="inline">{requestTechnicalDetails.details}</dd></div>}{requestTechnicalDetails.hint && <div><dt className="inline font-bold">Hint:</dt> <dd className="inline">{requestTechnicalDetails.hint}</dd></div>}</dl></details>}</div>}<div className="overflow-y-auto p-6 sm:p-8"><div className="grid gap-4 sm:grid-cols-2"><FormField label="Full name" id="name" value={form.name} onChange={update} error={errors.name} placeholder="Juan Dela Cruz" /><FormField label="Mobile number" id="mobile" value={form.mobile} onChange={update} error={errors.mobile} placeholder="09XXXXXXXXX" type="tel" /><FormField label="Email address" id="email" value={form.email} onChange={update} error={errors.email} placeholder="you@example.com" type="email" /></div><div className="mt-5 grid gap-4 sm:grid-cols-2"><FormField label="Preferred date" id="date" value={form.date} onChange={update} error={errors.date} type="date" /><FormField label="Preferred time" id="time" value={form.time} onChange={update} error={errors.time} type="time" /></div><label className="mt-5 block text-sm font-bold text-[#102b4e]">Viewing mode<select value={mode} onChange={(e) => setMode(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 font-medium outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100"><option value="accompanied">Accompanied viewing · ₱150</option><option value="unaccompanied">Unaccompanied viewing �� Free</option><option value="proxy">Palihog / proxy viewing · ₱100</option></select></label><p className="mt-2 text-xs text-slate-500">Accompanied: a Boarders Iloilo guide joins you. Unaccompanied: visit on your own. Palihog/proxy: a representative checks the room for you.</p><label className="mt-5 block text-sm font-bold text-[#102b4e]">Payment method<select value={payment} onChange={(e) => setPayment(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 font-medium outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100"><option>GCash</option><option>Cash</option></select></label><label className="mt-5 block text-sm font-bold text-[#102b4e]">Notes <textarea value={form.notes} onChange={(e) => update('notes', e.target.value)} rows={3} placeholder="Anything we should know? (optional)" className="mt-2 w-full resize-none rounded-xl border border-slate-200 px-3.5 py-3 font-normal outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100" /></label></div><div className="flex items-center justify-between gap-4 border-t border-slate-100 bg-white p-5 sm:px-8"><div><p className="text-xs font-bold uppercase tracking-wide text-slate-400">Viewing fee</p><p className="text-xl font-bold text-[#102b4e]">{money(viewingFees[mode as ViewingMode])}</p></div><button type="submit" className="rounded-2xl bg-amber-400 px-5 py-3.5 font-bold text-[#102b4e] shadow-sm hover:bg-amber-300 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-200">Submit request</button></div></form>}</Overlay> }
 
 function FormField({ label, id, value, onChange, error, placeholder, type = 'text' }: { label: string; id: string; value: string; onChange: (id: string, value: string) => void; error?: string; placeholder?: string; type?: string }) { return <label className="block text-sm font-bold text-[#102b4e]">{label}<input id={id} type={type} value={value} onChange={(e) => onChange(id, e.target.value)} placeholder={placeholder} aria-invalid={Boolean(error)} aria-describedby={error ? `${id}-error` : undefined} className={`mt-2 w-full rounded-xl border px-3.5 py-3 font-normal outline-none transition focus:ring-2 focus:ring-amber-100 ${error ? 'border-red-400 focus:border-red-400' : 'border-slate-200 focus:border-amber-400'}`} />{error && <span id={`${id}-error`} className="mt-1 block text-xs font-medium text-red-600">{error}</span>}</label> }
