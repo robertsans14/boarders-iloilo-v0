@@ -1,7 +1,7 @@
 'use client'
 
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { CheckCircle2, Eye, EyeOff, LogOut, MessageCircle, Star, UserRound } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { GuideApplicationPanel } from './guide-application-panel'
@@ -56,6 +56,7 @@ export function AuthPanel() {
   const [loading, setLoading] = useState(true)
   const [resending, setResending] = useState(false)
   const searchParams = useSearchParams()
+  const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
 
   async function loadProfile(userId: string) {
@@ -118,6 +119,7 @@ export function AuthPanel() {
       const isUnconfirmed = mode === 'login' && /email not confirmed|not confirmed/i.test(result.error.message)
       return setError(isUnconfirmed ? 'Please confirm your email first.' : mode === 'login' ? 'Invalid email or password.' : 'We could not create your account. Check your details and try again.')
     }
+    if (result.data.session && searchParams.get('redirect')) { router.push(searchParams.get('redirect')!) ; return }
     setMessage(mode === 'signup' && !result.data.session ? 'Check your email to confirm your account, then log in.' : 'Your account is ready.')
   }
 
