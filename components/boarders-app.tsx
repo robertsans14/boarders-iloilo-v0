@@ -87,7 +87,7 @@ const viewingRequestSchema = z.object({
   preferred_date: z.string().min(1),
   preferred_time: z.string().min(1),
   notes: z.string().nullable(),
-  viewing_mode: z.enum(['accompanied', 'unaccompanied']),
+  viewing_mode: z.enum(['accompanied', 'unaccompanied', 'proxy']),
   payment_method: z.enum(['GCash', 'Cash']),
   fee: z.number().finite().nonnegative(),
   status: z.literal('Pending'),
@@ -179,7 +179,7 @@ event.preventDefault()
     if (!validation.success) {
       const firstIssue = validation.error.issues[0]
       setRequestNotice('We could not save your request. Please review your selections and try again.')
-      setRequestTechnicalDetails({ code: 'CLIENT_VALIDATION', details: firstIssue?.message ?? 'Request payload did not match the required format.' })
+      setRequestTechnicalDetails({ code: 'CLIENT_VALIDATION', message: firstIssue?.message ?? 'Request payload did not match the required format.', details: firstIssue?.message })
       return
     }
     const response = await fetch('/api/viewing-requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(validation.data) })
