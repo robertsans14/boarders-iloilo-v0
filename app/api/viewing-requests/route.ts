@@ -6,7 +6,6 @@ const propertyIds = new Set(['1', '2', '3', '4', 'wvsu-ladies-boarding-house'])
 
 const requestSchema = z.object({
   property_id: z.string().refine((value) => propertyIds.has(value), 'Choose an existing property.'),
-  school_or_student_id: z.string().trim().min(1, 'Enter your school or student ID.'),
   full_name: z.string().trim().min(1),
   mobile: z.string().regex(/^09\d{9}$/),
   email: z.string().email(),
