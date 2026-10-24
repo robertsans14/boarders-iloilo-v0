@@ -152,7 +152,7 @@ export function AdminPortal() {
   }
 
   async function copyRequest(item: RequestRow) {
-    await navigator.clipboard.writeText(`Boarders Iloilo viewing request ${item.id}\nStudent: ${item.full_name} (${item.email}, ${item.mobile})\nProperty: ${propertyLabel(item.property_id)}\nSchedule: ${item.preferred_date} at ${item.preferred_time}\nMode: ${item.viewing_mode}\nFee: ₱${item.fee.toLocaleString('en-PH')} via ${item.payment_method}\nStatus: ${item.status}\nNotes: ${item.notes ?? 'None'}`)
+    await navigator.clipboard.writeText(`Boarders Iloilo viewing request ${item.id}\nStudent: ${item.full_name} (${item.email}, ${item.mobile})\nProperty: ${propertyLabel(item.property_id)}\nSchedule: ${item.preferred_date} at ${item.preferred_time}\nMode: ${item.viewing_mode === 'proxy' ? 'Palihog / proxy viewing' : item.viewing_mode === 'accompanied' ? 'Accompanied viewing' : 'Unaccompanied viewing'}\nFee: ₱${item.fee.toLocaleString('en-PH')} via ${item.payment_method}\nStatus: ${item.status}\nNotes: ${item.notes ?? 'None'}`)
     setNotice('Request summary copied. External contact has not been marked as sent.')
   }
 

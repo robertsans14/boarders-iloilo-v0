@@ -12,7 +12,7 @@ const requestSchema = z.object({
   preferred_date: z.string().min(1),
   preferred_time: z.string().min(1),
   notes: z.string().nullable(),
-  viewing_mode: z.enum(['accompanied', 'unaccompanied']),
+  viewing_mode: z.enum(['accompanied', 'unaccompanied', 'proxy']),
   payment_method: z.enum(['GCash', 'Cash']),
   fee: z.number().finite().nonnegative(),
 }).superRefine((value, context) => {
